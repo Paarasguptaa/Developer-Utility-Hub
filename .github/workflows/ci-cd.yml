@@ -1,0 +1,211 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-ci:
+    name: Build, Test, Security (Frontend)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: SEO assets (sitemap/robots)
+        run: npm run seo || echo "SEO script optional; continuing"
+
+      - name: Run tests
+        run: npm run test -- --ci
+
+      - name: Security scan (npm audit)
+        run: |
+          npm audit --json > ../npm-audit.json || true
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit
+          path: npm-audit.json
+
+      - name: Build
+        run: npm run build
+
+  server-ci:
+    name: Build, Security (Server)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Security scan (npm audit)
+        run: |
+          npm audit --json > ../server-npm-audit.json || true
+      - name: Upload server audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-npm-audit
+          path: server-npm-audit.json
+
+  codeql:
+    name: CodeQL Security Analysis
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  deploy:
+    name: Deploy with health-check and zero downtime
+    needs: [ frontend-ci ]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.seturl.outputs.prod_url }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Build (reconfirm)
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy canary (preview)
+        id: deploy
+        run: |
+          PREVIEW_JSON=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --scope "${{ secrets.VERCEL_ORG_ID }}" --project "${{ secrets.VERCEL_PROJECT_ID }}" --yes --confirm --json)
+          echo "$PREVIEW_JSON" > ../vercel-preview.json
+          URL=$(jq -r '.url' <<< "$PREVIEW_JSON")
+          echo "url=$URL" >> $GITHUB_OUTPUT
+      - name: Upload preview metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: vercel-preview
+          path: vercel-preview.json
+
+      - name: Health check
+        id: health
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          echo "Checking $URL"
+          for i in 1 2 3; do
+            sleep 3
+            if curl -fsSL "https://$URL" >/dev/null; then
+              echo "healthy=1" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          done
+          echo "healthy=0" >> $GITHUB_OUTPUT
+          exit 1
+
+      - name: Promote to production alias
+        if: steps.health.outputs.healthy == '1'
+        id: alias
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          vercel alias set "$URL" "${{ secrets.PROD_DOMAIN }}" --token "${{ secrets.VERCEL_TOKEN }}" --scope "${{ secrets.VERCEL_ORG_ID }}"
+          echo "prod_url=https://${{ secrets.PROD_DOMAIN }}" >> $GITHUB_OUTPUT
+
+      - name: Set environment URL
+        if: steps.health.outputs.healthy == '1'
+        id: seturl
+        run: echo "prod_url=https://${{ secrets.PROD_DOMAIN }}" >> $GITHUB_OUTPUT
+
+      - name: Deployment failed — keeping previous alias (automatic rollback)
+        if: steps.health.outputs.healthy != '1'
+        run: |
+          echo "Health check failed; production alias unchanged. Manual rollback available via aliasing a known good URL."
+
+  server-deploy:
+    name: Deploy Server (Render) with health-check
+    needs: [ server-ci ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        run: |
+          if [ -z "${{ secrets.RENDER_DEPLOY_HOOK }}" ]; then
+            echo "Missing RENDER_DEPLOY_HOOK secret" && exit 1
+          fi
+          curl -fsSL -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+      - name: Wait for service health
+        id: health
+        run: |
+          if [ -z "${{ secrets.SERVER_HEALTH_URL }}" ]; then
+            echo "Missing SERVER_HEALTH_URL secret" && exit 1
+          fi
+          URL="${{ secrets.SERVER_HEALTH_URL }}"
+          echo "Polling $URL for readiness"
+          for i in $(seq 1 18); do
+            sleep 10
+            if curl -fsS "$URL" >/dev/null; then
+              echo "healthy=1" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "attempt=$i"
+          done
+          echo "healthy=0" >> $GITHUB_OUTPUT
+          exit 1
+
+      - name: Deployment failed — rollback handled by Render health checks
+        if: steps.health.outputs.healthy != '1'
+        run: |
+          echo "Health check failed; Render keeps last healthy version. Investigate logs and retry."

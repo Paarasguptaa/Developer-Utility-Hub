@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: duh-webhook-server
+    env: node
+    plan: free
+    region: oregon
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: false
+    envVars:
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_API_KEY
+        sync: false
+      - key: PORT
+        value: 10000
