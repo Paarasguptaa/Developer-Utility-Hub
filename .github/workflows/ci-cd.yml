@@ -105,6 +105,8 @@ jobs:
     name: Deploy with health-check and zero downtime
     needs: [ frontend-ci ]
     runs-on: ubuntu-latest
+    env:
+      VERCEL_TELEMETRY_DISABLED: '1'
     environment:
       name: production
       url: ${{ steps.seturl.outputs.prod_url }}
@@ -119,6 +121,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Validate Vercel secrets
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then echo "Missing VERCEL_TOKEN secret" && exit 1; fi
+          if [ -z "${{ secrets.VERCEL_ORG_ID }}" ]; then echo "Missing VERCEL_ORG_ID secret" && exit 1; fi
+          if [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ]; then echo "Missing VERCEL_PROJECT_ID secret" && exit 1; fi
+          if [ -z "${{ secrets.PROD_DOMAIN }}" ]; then echo "Missing PROD_DOMAIN secret" && exit 1; fi
 
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
