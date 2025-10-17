@@ -138,15 +138,21 @@ jobs:
       - name: Deploy canary (preview)
         id: deploy
         run: |
-          PREVIEW_JSON=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --yes --confirm --json)
-          echo "$PREVIEW_JSON" > ../vercel-preview.json
-          URL=$(jq -r '.url' <<< "$PREVIEW_JSON")
-          echo "url=$URL" >> $GITHUB_OUTPUT
+-         PREVIEW_JSON=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --yes --confirm --json)
+-         echo "$PREVIEW_JSON" > ../vercel-preview.json
+-         URL=$(jq -r '.url' <<< "$PREVIEW_JSON")
+-         echo "url=$URL" >> $GITHUB_OUTPUT
++         DEPLOY_OUTPUT=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --yes --confirm)
++         echo "$DEPLOY_OUTPUT" > ../vercel-preview.txt
++         URL=$(echo "$DEPLOY_OUTPUT" | grep -Eo 'https://[^ ]+' | tail -n1)
++         if [ -z "$URL" ]; then echo "Failed to parse preview URL" && exit 1; fi
++         echo "url=${URL#https://}" >> $GITHUB_OUTPUT
       - name: Upload preview metadata
         uses: actions/upload-artifact@v4
         with:
           name: vercel-preview
-          path: vercel-preview.json
+-         path: vercel-preview.json
++         path: vercel-preview.txt
 
       - name: Health check
         id: health
