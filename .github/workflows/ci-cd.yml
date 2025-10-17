@@ -105,11 +105,11 @@ jobs:
     name: Deploy with health-check and zero downtime
     needs: [ frontend-ci ]
     runs-on: ubuntu-latest
-    env:
-      VERCEL_TELEMETRY_DISABLED: '1'
     environment:
       name: production
       url: ${{ steps.seturl.outputs.prod_url }}
+    env:
+      VERCEL_TELEMETRY_DISABLED: '1'
     defaults:
       run:
         working-directory: app
@@ -122,15 +122,14 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+      
       - name: Validate Vercel secrets
         run: |
           if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then echo "Missing VERCEL_TOKEN secret" && exit 1; fi
-          if [ -z "${{ secrets.VERCEL_ORG_ID }}" ]; then echo "Missing VERCEL_ORG_ID secret" && exit 1; fi
           if [ -z "${{ secrets.VERCEL_PROJECT_ID }}" ]; then echo "Missing VERCEL_PROJECT_ID secret" && exit 1; fi
           if [ -z "${{ secrets.PROD_DOMAIN }}" ]; then echo "Missing PROD_DOMAIN secret" && exit 1; fi
-
-      - name: Install Vercel CLI
-        run: npm i -g vercel@latest
 
       - name: Build (reconfirm)
         run: |
@@ -140,7 +139,7 @@ jobs:
       - name: Deploy canary (preview)
         id: deploy
         run: |
-          PREVIEW_JSON=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --scope "${{ secrets.VERCEL_ORG_ID }}" --project "${{ secrets.VERCEL_PROJECT_ID }}" --yes --confirm --json)
+          PREVIEW_JSON=$(vercel deploy --cwd . --token "${{ secrets.VERCEL_TOKEN }}" --project "${{ secrets.VERCEL_PROJECT_ID }}" --yes --confirm --json)
           echo "$PREVIEW_JSON" > ../vercel-preview.json
           URL=$(jq -r '.url' <<< "$PREVIEW_JSON")
           echo "url=$URL" >> $GITHUB_OUTPUT
@@ -170,7 +169,7 @@ jobs:
         id: alias
         run: |
           URL="${{ steps.deploy.outputs.url }}"
-          vercel alias set "$URL" "${{ secrets.PROD_DOMAIN }}" --token "${{ secrets.VERCEL_TOKEN }}" --scope "${{ secrets.VERCEL_ORG_ID }}"
+          vercel alias set "$URL" "${{ secrets.PROD_DOMAIN }}" --token "${{ secrets.VERCEL_TOKEN }}"
           echo "prod_url=https://${{ secrets.PROD_DOMAIN }}" >> $GITHUB_OUTPUT
 
       - name: Set environment URL
