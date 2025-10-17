@@ -40,7 +40,7 @@ jobs:
         run: npm run seo || echo "SEO script optional; continuing"
 
       - name: Run tests
-        run: npm run test -- --ci
+        run: npm run test:ci
 
       - name: Security scan (npm audit)
         run: |
