@@ -72,7 +72,7 @@ Centralized toolkit and web app for everyday developer workflows, plus a lightwe
   - Build, security scan, deploy to Render via webhook/API, wait for health.
 - Required GitHub Secrets:
   - Frontend: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
-  - Server: `RENDER_DEPLOY_WEBHOOK_URL` (or `RENDER_API_KEY` + `RENDER_SERVICE_ID`).
+  - Server: `RENDER_DEPLOY_HOOK`, `SERVER_HEALTH_URL` (or alternatively `RENDER_API_KEY` + `RENDER_SERVICE_ID`).
 
 ## Deployment
 
@@ -85,6 +85,9 @@ Centralized toolkit and web app for everyday developer workflows, plus a lightwe
 - Use `render.yaml` to create a free Node service for the webhook.
 - Set env vars: `STRIPE_WEBHOOK_SECRET`, `STRIPE_API_KEY`, and confirm `PORT`.
 - Ensure health check path matches your service configuration.
+ - For CI deploys, add GitHub secrets:
+   - `RENDER_DEPLOY_HOOK`: Render Deploy Hook URL from Service → Settings → Deploy Hooks.
+   - `SERVER_HEALTH_URL`: Your service URL (e.g., `https://developer-utility-hub.onrender.com/`).
 
 ### Stripe Webhook
 - In Stripe Dashboard, create a webhook endpoint pointing to your deployed server (e.g., `https://your-server.onrender.com/webhook`).
